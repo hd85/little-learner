@@ -1146,7 +1146,7 @@ function StickerGallery({ stickers, onClose }) {
 }
 
 // ============ FEEDBACK ============
-const ADMIN_EMAILS = ["hasnaindossa@gmail.com", "faizehdossa@gmail.com"];
+const ADMIN_EMAILS = ["faizehandhasnain@gmail.com"];
 
 function FeedbackInbox() {
   const [items, setItems] = useState([]);
