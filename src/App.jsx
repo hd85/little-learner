@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import * as Tone from "tone";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
+import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc } from "firebase/firestore";
 
 // ============ FIREBASE CONFIG ============
 // Client-side identifiers (safe to commit). Security is enforced by Firestore rules.
@@ -1145,8 +1145,51 @@ function StickerGallery({ stickers, onClose }) {
   </div>;
 }
 
+// ============ FEEDBACK ============
+function FeedbackForm({ childName, user }) {
+  const [text, setText] = useState("");
+  const [sent, setSent] = useState(false);
+  const submit = async () => {
+    if (!text.trim() || !FIREBASE_ENABLED) return;
+    try {
+      await addDoc(collection(db, "feedback"), {
+        message: text.trim(),
+        childName: childName || "Unknown",
+        parentEmail: user?.email || "anonymous",
+        timestamp: new Date().toISOString(),
+      });
+      setText("");
+      setSent(true);
+      setTimeout(() => setSent(false), 3000);
+    } catch (e) { /* ignore */ }
+  };
+  return <div style={{ marginTop: 20, borderTop: "1px solid #EDE6DC", paddingTop: 16 }}>
+    <h4 style={{ fontFamily: "'Baloo 2', cursive", fontSize: 16, color: theme.text, margin: "0 0 8px" }}>💬 Send Feedback</h4>
+    <p style={{ fontFamily: "'Quicksand', sans-serif", fontSize: 11, color: theme.textLight, marginBottom: 8 }}>Ideas, bugs, or suggestions — we'd love to hear from you!</p>
+    <textarea
+      value={text} onChange={e => setText(e.target.value)}
+      placeholder="What's working? What could be better?"
+      rows={3}
+      style={{
+        width: "100%", fontFamily: "'Quicksand', sans-serif", fontSize: 14,
+        padding: 12, borderRadius: 12, border: `1px solid #EDE6DC`,
+        background: theme.card, color: theme.text, resize: "vertical", outline: "none",
+      }}
+    />
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+      <button onClick={submit} disabled={!text.trim()} style={{
+        padding: "8px 20px", borderRadius: 14, border: "none",
+        background: text.trim() ? theme.accent2 : "#ddd", color: "#fff",
+        fontFamily: "'Quicksand', sans-serif", fontSize: 13, fontWeight: 600,
+        cursor: text.trim() ? "pointer" : "default",
+      }}>Send</button>
+      {sent && <span style={{ fontFamily: "'Quicksand', sans-serif", fontSize: 12, color: theme.accent2 }}>✓ Sent — thank you!</span>}
+    </div>
+  </div>;
+}
+
 // ============ PARENT DASHBOARD ============
-function ParentDashboard({ progress, onClose }) {
+function ParentDashboard({ progress, onClose, user }) {
   const activityNames = { counting: "Counting", shapes: "Shapes", letters: "Letters", matching: "Letter Match", tracing: "Tracing", words: "Word Builder", habitats: "Animal Homes", arsenal: "Arsenal Quiz", colorMixer: "Color Mixer", patterns: "Patterns", oddOneOut: "Odd One Out" };
   const recentActivities = ALL_ACTIVITY_IDS.map(id => ({ id, name: activityNames[id], ...progress.stats[id] })).filter(s => s.plays > 0).sort((a, b) => (b.lastPlayed || "").localeCompare(a.lastPlayed || ""));
   const strongAreas = recentActivities.filter(a => a.bestScore >= 6);
@@ -1216,6 +1259,9 @@ function ParentDashboard({ progress, onClose }) {
         <h4 style={{ fontFamily: "'Baloo 2', cursive", fontSize: 16, color: theme.text, margin: "0 0 8px" }}>🏠 Try at Home</h4>
         {suggestions.map((s, i) => <p key={i} style={{ fontFamily: "'Quicksand', sans-serif", fontSize: 13, color: theme.textLight, margin: "4px 0", paddingLeft: 12, borderLeft: `3px solid ${theme.accent2}` }}>{s}</p>)}
       </div>}
+
+      {/* Feedback */}
+      <FeedbackForm childName={progress.childName} user={user} />
     </div>
   </div>;
 }
@@ -1343,7 +1389,7 @@ function HomeScreen({ onSelect, progress, user, authLoading, signIn, logOut, syn
       >Made with 💛{progress.childName ? ` for ${progress.childName}` : ""}</p>
     </div>
     {showStickers && <StickerGallery stickers={progress.stickers} onClose={() => setShowStickers(false)} />}
-    {showParent && <ParentDashboard progress={progress} onClose={() => setShowParent(false)} />}
+    {showParent && <ParentDashboard progress={progress} onClose={() => setShowParent(false)} user={user} />}
   </div>;
 }
 
