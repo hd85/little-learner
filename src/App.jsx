@@ -8,12 +8,12 @@ import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
 // Client-side identifiers (safe to commit). Security is enforced by Firestore rules.
 // Replace with your Firebase project config from Firebase Console → Project Settings → Web App
 const firebaseConfig = {
-  apiKey: "REPLACE_ME",
-  authDomain: "REPLACE_ME.firebaseapp.com",
-  projectId: "REPLACE_ME",
-  storageBucket: "REPLACE_ME.firebasestorage.app",
-  messagingSenderId: "REPLACE_ME",
-  appId: "REPLACE_ME"
+  apiKey: "AIzaSyAcPs8TX7-ILJ0FvMXUMhIJgZ2T8JTFRW8",
+  authDomain: "little-learner-f0341.firebaseapp.com",
+  projectId: "little-learner-f0341",
+  storageBucket: "little-learner-f0341.firebasestorage.app",
+  messagingSenderId: "481835344480",
+  appId: "1:481835344480:web:36bbc64575a894bf2cd905"
 };
 
 const FIREBASE_ENABLED = firebaseConfig.apiKey !== "REPLACE_ME";
