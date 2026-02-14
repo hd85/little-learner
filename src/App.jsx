@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import * as Tone from "tone";
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc } from "firebase/firestore";
+import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc, query, orderBy, getDocs } from "firebase/firestore";
 
 // ============ FIREBASE CONFIG ============
 // Client-side identifiers (safe to commit). Security is enforced by Firestore rules.
@@ -1146,6 +1146,30 @@ function StickerGallery({ stickers, onClose }) {
 }
 
 // ============ FEEDBACK ============
+const ADMIN_EMAILS = ["hasnaindossa@gmail.com", "faizehdossa@gmail.com"];
+
+function FeedbackInbox() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!FIREBASE_ENABLED) return;
+    getDocs(query(collection(db, "feedback"), orderBy("timestamp", "desc")))
+      .then(snap => { setItems(snap.docs.map(d => d.data())); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+  return <div style={{ marginTop: 20, borderTop: "1px solid #EDE6DC", paddingTop: 16 }}>
+    <h4 style={{ fontFamily: "'Baloo 2', cursive", fontSize: 16, color: theme.text, margin: "0 0 8px" }}>📬 All Feedback</h4>
+    {loading && <p style={{ fontFamily: "'Quicksand', sans-serif", fontSize: 13, color: theme.textLight }}>Loading…</p>}
+    {!loading && items.length === 0 && <p style={{ fontFamily: "'Quicksand', sans-serif", fontSize: 13, color: theme.textLight }}>No feedback yet!</p>}
+    {items.map((fb, i) => <div key={i} style={{ background: theme.card, borderRadius: 12, padding: 12, marginBottom: 8, boxShadow: theme.shadow }}>
+      <p style={{ fontFamily: "'Quicksand', sans-serif", fontSize: 14, color: theme.text, margin: 0 }}>{fb.message}</p>
+      <p style={{ fontFamily: "'Quicksand', sans-serif", fontSize: 11, color: theme.textLight, marginTop: 6 }}>
+        {fb.childName} · {fb.parentEmail} · {new Date(fb.timestamp).toLocaleDateString()}
+      </p>
+    </div>)}
+  </div>;
+}
+
 function FeedbackForm({ childName, user }) {
   const [text, setText] = useState("");
   const [sent, setSent] = useState(false);
@@ -1262,6 +1286,7 @@ function ParentDashboard({ progress, onClose, user }) {
 
       {/* Feedback */}
       <FeedbackForm childName={progress.childName} user={user} />
+      {user?.email && ADMIN_EMAILS.includes(user.email) && <FeedbackInbox />}
     </div>
   </div>;
 }
