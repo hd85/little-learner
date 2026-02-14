@@ -1,5 +1,29 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as Tone from "tone";
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
+
+// ============ FIREBASE CONFIG ============
+// Client-side identifiers (safe to commit). Security is enforced by Firestore rules.
+// Replace with your Firebase project config from Firebase Console → Project Settings → Web App
+const firebaseConfig = {
+  apiKey: "REPLACE_ME",
+  authDomain: "REPLACE_ME.firebaseapp.com",
+  projectId: "REPLACE_ME",
+  storageBucket: "REPLACE_ME.firebasestorage.app",
+  messagingSenderId: "REPLACE_ME",
+  appId: "REPLACE_ME"
+};
+
+const FIREBASE_ENABLED = firebaseConfig.apiKey !== "REPLACE_ME";
+let auth = null, db = null;
+const googleProvider = new GoogleAuthProvider();
+if (FIREBASE_ENABLED) {
+  const firebaseApp = initializeApp(firebaseConfig);
+  auth = getAuth(firebaseApp);
+  db = getFirestore(firebaseApp);
+}
 
 const GOOGLE_FONTS = "https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&family=Baloo+2:wght@400;500;600;700;800&display=swap";
 
@@ -472,6 +496,103 @@ function checkNewStickers(progress) {
   return newOnes;
 }
 
+// ============ AUTH HOOK ============
+function useAuth() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(FIREBASE_ENABLED);
+
+  useEffect(() => {
+    if (!FIREBASE_ENABLED) return;
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    // Handle redirect result (iOS Safari fallback)
+    getRedirectResult(auth).catch(() => {});
+    return unsub;
+  }, []);
+
+  const signIn = useCallback(async () => {
+    if (!FIREBASE_ENABLED) return;
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (e) {
+      // Popup blocked (iOS Safari) — fallback to redirect
+      if (e.code === "auth/popup-blocked" || e.code === "auth/popup-closed-by-user") {
+        signInWithRedirect(auth, googleProvider);
+      }
+    }
+  }, []);
+
+  const logOut = useCallback(async () => {
+    if (!FIREBASE_ENABLED) return;
+    await signOut(auth);
+  }, []);
+
+  return { user, authLoading, signIn, logOut };
+}
+
+// ============ MERGE PROGRESS ============
+function mergeProgress(local, remote) {
+  if (!remote) return local;
+  if (!local) return remote;
+
+  // Merge stats: Math.max for numeric fields, latest lastPlayed
+  const mergedStats = { ...DEFAULT_PROGRESS.stats };
+  ALL_ACTIVITY_IDS.forEach(id => {
+    const l = local.stats?.[id] || {};
+    const r = remote.stats?.[id] || {};
+    mergedStats[id] = {
+      plays: Math.max(l.plays || 0, r.plays || 0),
+      bestScore: Math.max(l.bestScore || 0, r.bestScore || 0),
+      totalStars: Math.max(l.totalStars || 0, r.totalStars || 0),
+      lastPlayed: (l.lastPlayed || "") > (r.lastPlayed || "") ? l.lastPlayed : r.lastPlayed,
+    };
+  });
+
+  // Stickers: set union
+  const mergedStickers = [...new Set([...(local.stickers || []), ...(remote.stickers || [])])];
+
+  // Streak: device with more recent lastDate wins, Math.max for longest
+  const lStreak = local.streak || {};
+  const rStreak = remote.streak || {};
+  const streakWinner = (lStreak.lastDate || "") >= (rStreak.lastDate || "") ? lStreak : rStreak;
+  const mergedStreak = {
+    current: streakWinner.current || 0,
+    lastDate: streakWinner.lastDate || null,
+    longest: Math.max(lStreak.longest || 0, rStreak.longest || 0),
+  };
+
+  // Values reinforced: Math.max per value
+  const mergedValues = {};
+  const allValueKeys = new Set([...Object.keys(local.valuesReinforced || {}), ...Object.keys(remote.valuesReinforced || {})]);
+  allValueKeys.forEach(k => {
+    mergedValues[k] = Math.max((local.valuesReinforced || {})[k] || 0, (remote.valuesReinforced || {})[k] || 0);
+  });
+
+  // totalStars: recalculate from merged stats (source of truth)
+  const totalStars = ALL_ACTIVITY_IDS.reduce((sum, id) => sum + (mergedStats[id]?.totalStars || 0), 0);
+
+  // Session metadata: most recent device wins
+  const localDate = local.lastSessionDate || "";
+  const remoteDate = remote.lastSessionDate || "";
+  const metaWinner = localDate >= remoteDate ? local : remote;
+
+  return {
+    ...DEFAULT_PROGRESS,
+    version: 2,
+    stats: mergedStats,
+    stickers: mergedStickers,
+    streak: mergedStreak,
+    totalStars,
+    valuesReinforced: mergedValues,
+    lastActivity: metaWinner.lastActivity || null,
+    lastSessionDate: metaWinner.lastSessionDate || null,
+    companionName: local.companionName || remote.companionName || "Sprout",
+    sessionsToday: metaWinner.sessionsToday || 0,
+  };
+}
+
 // ============ PROGRESS HOOK ============
 function useProgress() {
   const [progress, setProgress] = useState(() => {
@@ -493,12 +614,85 @@ function useProgress() {
     return DEFAULT_PROGRESS;
   });
 
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | synced | offline
+  const firestoreUserRef = useRef(null);
+  const unsubFirestore = useRef(null);
+  const isOwnWrite = useRef(false);
+
+  // Save to localStorage (always) and Firestore (if signed in)
   const save = useCallback((updater) => {
     setProgress(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       try { localStorage.setItem("littleLearner_progress", JSON.stringify(next)); } catch (e) { /* ignore */ }
+      // Async write to Firestore
+      if (firestoreUserRef.current && FIREBASE_ENABLED) {
+        isOwnWrite.current = true;
+        setSyncStatus("syncing");
+        setDoc(firestoreUserRef.current, next)
+          .then(() => setSyncStatus("synced"))
+          .catch(() => setSyncStatus("offline"));
+      }
       return next;
     });
+  }, []);
+
+  // Connect/disconnect Firestore listener when user changes
+  const setUser = useCallback((user) => {
+    // Clean up previous listener
+    if (unsubFirestore.current) {
+      unsubFirestore.current();
+      unsubFirestore.current = null;
+    }
+
+    if (!user || !FIREBASE_ENABLED) {
+      firestoreUserRef.current = null;
+      setSyncStatus("idle");
+      return;
+    }
+
+    const userDocRef = doc(db, "progress", user.uid);
+    firestoreUserRef.current = userDocRef;
+    setSyncStatus("syncing");
+
+    let isFirstSnapshot = true;
+    unsubFirestore.current = onSnapshot(userDocRef, (snap) => {
+      if (isFirstSnapshot) {
+        isFirstSnapshot = false;
+        // First snapshot: merge Firestore data with localStorage
+        const remoteData = snap.exists() ? snap.data() : null;
+        setProgress(localPrev => {
+          const merged = mergeProgress(localPrev, remoteData);
+          try { localStorage.setItem("littleLearner_progress", JSON.stringify(merged)); } catch (e) { /* ignore */ }
+          // Write merged result back to Firestore
+          setDoc(userDocRef, merged).catch(() => {});
+          return merged;
+        });
+        setSyncStatus("synced");
+        return;
+      }
+      // Subsequent snapshots: skip our own writes
+      if (isOwnWrite.current) {
+        isOwnWrite.current = false;
+        return;
+      }
+      // Remote change from another device
+      const remoteData = snap.exists() ? snap.data() : null;
+      if (remoteData) {
+        setProgress(localPrev => {
+          const merged = mergeProgress(localPrev, remoteData);
+          try { localStorage.setItem("littleLearner_progress", JSON.stringify(merged)); } catch (e) { /* ignore */ }
+          return merged;
+        });
+        setSyncStatus("synced");
+      }
+    }, () => {
+      setSyncStatus("offline");
+    });
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { if (unsubFirestore.current) unsubFirestore.current(); };
   }, []);
 
   const recordActivity = useCallback((activityId, score, totalRounds) => {
@@ -543,7 +737,7 @@ function useProgress() {
     });
   }, [save]);
 
-  return { progress, recordActivity };
+  return { progress, recordActivity, setUser, syncStatus };
 }
 
 // ============ SHARED COMPONENTS ============
@@ -1037,7 +1231,7 @@ function getGreeting(progress) {
   return { text: `${timeGreeting}, Noah!`, sub: "Let's learn something wonderful! 🌿" };
 }
 
-function HomeScreen({ onSelect, progress }) {
+function HomeScreen({ onSelect, progress, user, authLoading, signIn, logOut, syncStatus }) {
   const [showStickers, setShowStickers] = useState(false);
   const [showParent, setShowParent] = useState(false);
   const pressTimer = useRef(null);
@@ -1106,6 +1300,33 @@ function HomeScreen({ onSelect, progress }) {
           </button>;
         })}
       </div>
+      {/* Sync UI — small, parent-facing */}
+      {FIREBASE_ENABLED && !authLoading && (
+        <div style={{ textAlign: "center", marginTop: 28, animation: "fadeUp 0.5s ease" }}>
+          {!user ? (
+            <button onClick={signIn} style={{
+              background: "none", border: "1px solid rgba(141,110,99,0.2)", borderRadius: 20,
+              padding: "8px 18px", cursor: "pointer", opacity: 0.6,
+              fontFamily: "'Quicksand', sans-serif", fontSize: 12, color: theme.textLight,
+              display: "inline-flex", alignItems: "center", gap: 6,
+              transition: "opacity 0.2s"
+            }} onMouseEnter={e => e.currentTarget.style.opacity = "1"} onMouseLeave={e => e.currentTarget.style.opacity = "0.6"}>
+              ☁️ Sync across devices
+            </button>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, opacity: 0.7 }}>
+              <span style={{ fontSize: 11, fontFamily: "'Quicksand', sans-serif", color: theme.textLight }}>
+                {syncStatus === "syncing" ? "☁️ Syncing…" : syncStatus === "synced" ? "☁️ Synced" : syncStatus === "offline" ? "📴 Offline" : "☁️"}
+              </span>
+              {user.photoURL && <img src={user.photoURL} alt="" style={{ width: 20, height: 20, borderRadius: "50%" }} referrerPolicy="no-referrer" />}
+              <button onClick={logOut} style={{
+                background: "none", border: "none", cursor: "pointer", padding: 0,
+                fontFamily: "'Quicksand', sans-serif", fontSize: 11, color: theme.textLight, textDecoration: "underline", opacity: 0.8
+              }}>sign out</button>
+            </div>
+          )}
+        </div>
+      )}
       <p
         onTouchStart={() => { pressTimer.current = setTimeout(() => setShowParent(true), 2000); }}
         onTouchEnd={() => clearTimeout(pressTimer.current)}
@@ -1123,7 +1344,11 @@ function HomeScreen({ onSelect, progress }) {
 // ============ APP ============
 export default function App() {
   const [screen, setScreen] = useState("home");
-  const { progress, recordActivity } = useProgress();
+  const { progress, recordActivity, setUser, syncStatus } = useProgress();
+  const { user, authLoading, signIn, logOut } = useAuth();
+
+  // Wire auth user into progress hook
+  useEffect(() => { setUser(user); }, [user, setUser]);
 
   const handleComplete = useCallback((activityId) => (score, total) => {
     recordActivity(activityId, score, total);
@@ -1144,7 +1369,7 @@ export default function App() {
     @keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.15); } }
     @keyframes rainbowShimmer { 0% { filter:hue-rotate(0deg); } 100% { filter:hue-rotate(360deg); } }
     button:focus-visible { outline:3px solid ${theme.accent4}; outline-offset:2px; }`}</style>
-    {screen === "home" && <HomeScreen onSelect={setScreen} progress={progress} />}
+    {screen === "home" && <HomeScreen onSelect={setScreen} progress={progress} user={user} authLoading={authLoading} signIn={signIn} logOut={logOut} syncStatus={syncStatus} />}
     {screen === "counting" && <CountingGame onBack={() => setScreen("home")} onComplete={handleComplete("counting")} totalStars={progress.totalStars} />}
     {screen === "shapes" && <ShapeSorting onBack={() => setScreen("home")} onComplete={handleComplete("shapes")} totalStars={progress.totalStars} />}
     {screen === "letters" && <LetterExplorer onBack={() => setScreen("home")} onComplete={handleComplete("letters")} totalStars={progress.totalStars} />}
