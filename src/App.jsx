@@ -467,6 +467,7 @@ const DEFAULT_PROGRESS = {
   lastSessionDate: null,
   companionName: "Sprout",
   sessionsToday: 0,
+  childName: "",
 };
 
 function checkNewStickers(progress) {
@@ -737,7 +738,11 @@ function useProgress() {
     });
   }, [save]);
 
-  return { progress, recordActivity, setUser, syncStatus };
+  const setChildName = useCallback((name) => {
+    save(prev => ({ ...prev, childName: name }));
+  }, [save]);
+
+  return { progress, recordActivity, setUser, syncStatus, setChildName };
 }
 
 // ============ SHARED COMPONENTS ============
@@ -1217,18 +1222,19 @@ function ParentDashboard({ progress, onClose }) {
 
 // ============ HOME SCREEN ============
 function getGreeting(progress) {
+  const name = progress.childName || "little learner";
   const hour = new Date().getHours();
   const timeGreeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const stage = getCompanionStage(progress.totalStars);
   const today = getToday();
   const totalPlays = ALL_ACTIVITY_IDS.reduce((sum, id) => sum + (progress.stats[id]?.plays || 0), 0);
 
-  if (progress.streak.current >= 7) return { text: `${timeGreeting}, Noah! ${progress.streak.current}-day streak!`, sub: `${stage.emoji} is so proud of you!` };
-  if (progress.streak.current >= 3) return { text: `${timeGreeting}, Noah! ${progress.streak.current} days in a row!`, sub: `${stage.emoji} ${stage.greeting}` };
-  if (totalPlays > 0 && progress.lastSessionDate !== today) return { text: "Welcome back, Noah!", sub: `${stage.emoji} Sprout missed you!` };
-  if ((progress.sessionsToday || 0) > 0) return { text: `${timeGreeting}, Noah!`, sub: "Ready for more adventures? 🌟" };
-  if (totalPlays === 0) return { text: "Hello, Noah! 🌱", sub: "Let's start an adventure together!" };
-  return { text: `${timeGreeting}, Noah!`, sub: "Let's learn something wonderful! 🌿" };
+  if (progress.streak.current >= 7) return { text: `${timeGreeting}, ${name}! ${progress.streak.current}-day streak!`, sub: `${stage.emoji} is so proud of you!` };
+  if (progress.streak.current >= 3) return { text: `${timeGreeting}, ${name}! ${progress.streak.current} days in a row!`, sub: `${stage.emoji} ${stage.greeting}` };
+  if (totalPlays > 0 && progress.lastSessionDate !== today) return { text: `Welcome back, ${name}!`, sub: `${stage.emoji} Sprout missed you!` };
+  if ((progress.sessionsToday || 0) > 0) return { text: `${timeGreeting}, ${name}!`, sub: "Ready for more adventures? 🌟" };
+  if (totalPlays === 0) return { text: `Hello, ${name}! 🌱`, sub: "Let's start an adventure together!" };
+  return { text: `${timeGreeting}, ${name}!`, sub: "Let's learn something wonderful! 🌿" };
 }
 
 function HomeScreen({ onSelect, progress, user, authLoading, signIn, logOut, syncStatus }) {
@@ -1334,17 +1340,51 @@ function HomeScreen({ onSelect, progress, user, authLoading, signIn, logOut, syn
         onMouseUp={() => clearTimeout(pressTimer.current)}
         onMouseLeave={() => clearTimeout(pressTimer.current)}
         style={{ textAlign: "center", fontFamily: "'Quicksand', sans-serif", fontSize: 13, color: theme.textLight, marginTop: 32, opacity: 0.6, cursor: "default", userSelect: "none" }}
-      >Made with 💛 for Noah</p>
+      >Made with 💛{progress.childName ? ` for ${progress.childName}` : ""}</p>
     </div>
     {showStickers && <StickerGallery stickers={progress.stickers} onClose={() => setShowStickers(false)} />}
     {showParent && <ParentDashboard progress={progress} onClose={() => setShowParent(false)} />}
   </div>;
 }
 
+// ============ NAME PROMPT ============
+function NamePrompt({ onSubmit }) {
+  const [name, setName] = useState("");
+  return <div style={{ minHeight: "100vh", background: theme.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+    <div style={{ textAlign: "center", maxWidth: 360, animation: "popIn 0.4s ease" }}>
+      <div style={{ fontSize: 56, marginBottom: 16 }}>🌱</div>
+      <h2 style={{ fontFamily: "'Baloo 2', cursive", fontSize: 28, color: theme.text, marginBottom: 8 }}>Welcome to Little Learner!</h2>
+      <p style={{ fontFamily: "'Quicksand', sans-serif", fontSize: 15, color: theme.textLight, marginBottom: 24 }}>What's your little learner's name?</p>
+      <input
+        type="text" value={name} onChange={e => setName(e.target.value)}
+        placeholder="e.g. Noah"
+        autoFocus
+        style={{
+          fontFamily: "'Quicksand', sans-serif", fontSize: 20, fontWeight: 600,
+          textAlign: "center", padding: "14px 20px", borderRadius: 16,
+          border: `2px solid ${theme.accent2}`, background: theme.card,
+          color: theme.text, width: "100%", outline: "none",
+        }}
+        onKeyDown={e => { if (e.key === "Enter" && name.trim()) onSubmit(name.trim()); }}
+      />
+      <button
+        onClick={() => { if (name.trim()) onSubmit(name.trim()); }}
+        disabled={!name.trim()}
+        style={{
+          marginTop: 16, padding: "14px 40px", borderRadius: 20, border: "none",
+          background: name.trim() ? theme.accent2 : "#ddd", color: "#fff",
+          fontFamily: "'Quicksand', sans-serif", fontSize: 17, fontWeight: 700,
+          cursor: name.trim() ? "pointer" : "default", transition: "all 0.2s",
+        }}
+      >Let's go! 🎉</button>
+    </div>
+  </div>;
+}
+
 // ============ APP ============
 export default function App() {
   const [screen, setScreen] = useState("home");
-  const { progress, recordActivity, setUser, syncStatus } = useProgress();
+  const { progress, recordActivity, setUser, syncStatus, setChildName } = useProgress();
   const { user, authLoading, signIn, logOut } = useAuth();
 
   // Wire auth user into progress hook
@@ -1353,6 +1393,16 @@ export default function App() {
   const handleComplete = useCallback((activityId) => (score, total) => {
     recordActivity(activityId, score, total);
   }, [recordActivity]);
+
+  // Show name prompt if no child name set
+  if (!progress.childName) {
+    return <>
+      <link href={GOOGLE_FONTS} rel="stylesheet" />
+      <style>{`* { box-sizing: border-box; margin: 0; padding: 0; } body { background: ${theme.bg}; }
+      @keyframes popIn { 0% { opacity:0; transform:scale(0.5); } 70% { transform:scale(1.05); } 100% { opacity:1; transform:scale(1); } }`}</style>
+      <NamePrompt onSubmit={setChildName} />
+    </>;
+  }
 
   return <>
     <link href={GOOGLE_FONTS} rel="stylesheet" />
