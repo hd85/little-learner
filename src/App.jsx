@@ -545,20 +545,26 @@ function useAuth() {
       setUser(u);
       setAuthLoading(false);
     });
-    // Handle redirect result (iOS Safari fallback)
-    getRedirectResult(auth).catch(() => {});
+    // Handle redirect result (iOS Safari uses redirect flow)
+    getRedirectResult(auth).then((result) => {
+      if (result?.user) setUser(result.user);
+    }).catch(() => {});
     return unsub;
   }, []);
 
   const signIn = useCallback(async () => {
     if (!FIREBASE_ENABLED) return;
+    // iOS/iPad Safari: popups are unreliable, use redirect directly
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+      signInWithRedirect(auth, googleProvider);
+      return;
+    }
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (e) {
-      // Popup blocked (iOS Safari) — fallback to redirect
-      if (e.code === "auth/popup-blocked" || e.code === "auth/popup-closed-by-user") {
-        signInWithRedirect(auth, googleProvider);
-      }
+      // Popup blocked — fallback to redirect
+      signInWithRedirect(auth, googleProvider);
     }
   }, []);
 
