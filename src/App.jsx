@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as Tone from "tone";
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc, query, orderBy, getDocs } from "firebase/firestore";
 
 // ============ FIREBASE CONFIG ============
@@ -545,26 +545,16 @@ function useAuth() {
       setUser(u);
       setAuthLoading(false);
     });
-    // Handle redirect result (iOS Safari uses redirect flow)
-    getRedirectResult(auth).then((result) => {
-      if (result?.user) setUser(result.user);
-    }).catch(() => {});
     return unsub;
   }, []);
 
   const signIn = useCallback(async () => {
     if (!FIREBASE_ENABLED) return;
-    // iOS/iPad Safari: popups are unreliable, use redirect directly
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    if (isIOS) {
-      signInWithRedirect(auth, googleProvider);
-      return;
-    }
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (e) {
-      // Popup blocked — fallback to redirect
-      signInWithRedirect(auth, googleProvider);
+      // User closed the popup or it was blocked — no action needed
+      console.log("Sign-in:", e.code);
     }
   }, []);
 
