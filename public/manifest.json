@@ -2,13 +2,13 @@
   "name": "Little Learner",
   "short_name": "Little Learner",
   "description": "Fun learning activities for little ones",
-  "start_url": "/little-learner/",
+  "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#FFF8F0",
   "theme_color": "#FFF8F0",
   "icons": [
-    { "src": "/little-learner/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/little-learner/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
   ]
 }

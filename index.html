@@ -10,8 +10,8 @@
     <meta name="description" content="Fun learning activities for little ones" />
     <title>Little Learner</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
-    <link rel="manifest" href="/little-learner/manifest.json" />
-    <link rel="apple-touch-icon" href="/little-learner/icon-192.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <style>
       /* Kill Safari bounce/rubber-banding in standalone mode */
       html, body {
@@ -36,7 +36,7 @@
       // Register service worker for PWA
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/little-learner/sw.js').catch(() => {});
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
         });
       }
     </script>

@@ -1,5 +1,5 @@
 const CACHE_NAME = "little-learner-v1";
-const BASE = "/little-learner/";
+const BASE = "/";
 
 // Cache the app shell on install
 self.addEventListener("install", (e) => {
